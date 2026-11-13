@@ -13,9 +13,9 @@ import {
   CLEARED_GUIDANCE_SUMMARY,
   CLEARED_GUIDANCE_TEXT,
   PLAN_POLICY_SECTION,
+  planDelivery,
   planTransition,
   renderGuidance,
-  sameSections,
   type GuidanceSection,
 } from './guidance.ts'
 
@@ -45,7 +45,7 @@ export const Config: z<Config> = z.object({
 
 const ENTER_PLAN_MODE = 'enter_plan_mode'
 const PROMPT_SECTION = 'agent-plan-entry:complexity-policy'
-const PLAN_ENTRY_PROMPT = 'Assess task complexity before taking action. Unless a task is trivial, localized to a single file, and fully specified, you MUST call `enter_plan_mode` first—especially for multi-file/module changes, architectural decisions, ambiguous requirements, or coordinated updates. While in plan mode, perform strictly read-only exploration without mutating any files or system state. Once ready, call `exit_plan_mode` with a comprehensive implementation plan and wait for explicit user approval before executing. When in doubt, always default to planning first.'
+const PLAN_ENTRY_PROMPT = 'Assess task complexity before taking action. Unless a task is trivial, localized to a single file, and fully specified, plan first—especially for multi-file/module changes, architectural decisions, ambiguous requirements, or coordinated updates. Enter plan mode with `enter_plan_mode`; while it is active, explore strictly read-only without mutating files or system state, then present the implementation plan with `exit_plan_mode` and wait for explicit user approval before executing. When in doubt, always default to planning first.'
 
 interface PlanSelection {
   readonly active: boolean
@@ -230,14 +230,10 @@ function registerRelocation(ctx: Context, relocated: ReadonlySet<string>): void 
       if (text.length > 0) moved.push({ name: section.name, text })
     }
 
-    if (moved.length === 0 && kept.length === result.sections.length) {
-      relocatedByAgent.set(agent, [])
-      return result
-    }
+    // Stash first: an unchanged assembly still has to leave the step's sections.
     relocatedByAgent.set(agent, moved)
-    if (moved.length === 0 && relocated.has(PLAN_POLICY_SECTION)) {
-      warnWhenPlanPolicyMissing(ctx, agent, result)
-    }
+    if (moved.length === 0 && kept.length === result.sections.length) return result
+    warnWhenPlanPolicyMissing(ctx, agent, result)
     return { ...result, sections: kept }
   })
 }
@@ -272,13 +268,12 @@ function registerDelivery(ctx: Context, noticeWhenCleared: boolean): void {
     const decision = await next()
     if (decision.kind === 'reject' || signal.aborted) return decision
     try {
-      const desired = relocatedByAgent.get(agent) ?? []
       const delivered = deliveredSections(agent)
-      if (sameSections(desired, delivered)) return decision
-      if (desired.length === 0 && (!noticeWhenCleared || delivered.length === 0)) return decision
-      const message = desired.length === 0
+      const delivery = planDelivery(relocatedByAgent.get(agent) ?? [], delivered, noticeWhenCleared)
+      if (delivery.kind === 'none') return decision
+      const message = delivery.kind === 'cleared'
         ? clearedGuidanceMessage()
-        : guidanceMessage(desired, planTransition(delivered, desired))
+        : guidanceMessage(delivery.sections, planTransition(delivered, delivery.sections))
       return { ...decision, messages: [...decision.messages, message] }
     } catch (error: unknown) {
       ctx.logger.warn('agent-plan-entry: failed to deliver relocated guidance at step start: %o', error)
@@ -288,7 +283,9 @@ function registerDelivery(ctx: Context, noticeWhenCleared: boolean): void {
 }
 
 export function apply(ctx: Context, config: Config): void {
-  const relocated = new Set([...config.relocatedSections, PROMPT_SECTION])
+  // Only deployment-owned sections move: this plugin's own policy paragraph is
+  // constant in both phases, so relocating it would only add a second copy.
+  const relocated = new Set(config.relocatedSections)
   ctx.effect(() => {
     const disposeTool = ctx.tools.register(createEnterPlanModeTool(ctx), {
       when: ({ agent }) => planModeFor(ctx, agent) !== undefined,
@@ -299,9 +296,10 @@ export function apply(ctx: Context, config: Config): void {
       text: (context: AssembleContext) => {
         const agent = context.agent
         if (agent === undefined) return ''
-        const entry = planModeEntry(ctx, agent)
-        if (entry === undefined) return ''
-        return selectedActive(entry.state) ? '' : PLAN_ENTRY_PROMPT
+        if (planModeFor(ctx, agent) === undefined) return ''
+        // Constant by design: the paragraph states the policy for both phases, so
+        // plan-mode transitions leave the assembled system prompt byte-identical.
+        return PLAN_ENTRY_PROMPT
       },
       interpolate: false,
     })

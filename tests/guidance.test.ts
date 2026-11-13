@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   CLEARED_GUIDANCE_TEXT,
   escapeReminderText,
+  planDelivery,
   planTransition,
   renderGuidance,
   sameSections,
@@ -93,4 +94,18 @@ test('planTransition reads the change from the plan section presence', () => {
   assert.equal(planTransition([planPolicy], [complexity]), 'left')
   assert.equal(planTransition([complexity], [complexity]), undefined)
   assert.equal(planTransition([], [planPolicy]), 'entered')
+})
+
+test('planDelivery stays silent until the plan section changes side', () => {
+  assert.deepEqual(planDelivery([], [], true), { kind: 'none' })
+  assert.deepEqual(planDelivery([planPolicy], [planPolicy], true), { kind: 'none' })
+  assert.deepEqual(planDelivery([planPolicy], [], true), { kind: 'snapshot', sections: [planPolicy] })
+})
+
+test('planDelivery retires plan guidance with a short notice instead of restating it', () => {
+  // Leaving plan mode: the standing policy never moved, so only the plan section retires.
+  assert.deepEqual(planDelivery([], [planPolicy], true), { kind: 'cleared' })
+  assert.deepEqual(planDelivery([], [planPolicy], false), { kind: 'none' })
+  // Nothing had been delivered: no notice is needed.
+  assert.deepEqual(planDelivery([], [], true), { kind: 'none' })
 })

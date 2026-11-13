@@ -109,3 +109,30 @@ export function sameSections(
     return other !== undefined && other.name === section.name && other.text === section.text
   })
 }
+
+/** What one step must deliver, if anything. */
+export type Delivery =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'snapshot', readonly sections: readonly GuidanceSection[] }
+  | { readonly kind: 'cleared' }
+
+/**
+ * Decide what a step delivers, given the sections it assembled and the sections
+ * the model read last.
+ * @param desired - sections the current step relocated out of the prompt head.
+ * @param delivered - sections the model read in the previous delivery.
+ * @param noticeWhenCleared - whether retired guidance produces a notice.
+ * @returns the delivery, or `none` when the model already reads the current guidance.
+ */
+export function planDelivery(
+  desired: readonly GuidanceSection[],
+  delivered: readonly GuidanceSection[],
+  noticeWhenCleared: boolean,
+): Delivery {
+  if (sameSections(desired, delivered)) return { kind: 'none' }
+  if (desired.length > 0) return { kind: 'snapshot', sections: desired }
+  // Nothing applies now: retire the previous delivery in one short notice rather
+  // than restating guidance the model already read.
+  if (!noticeWhenCleared || delivered.length === 0) return { kind: 'none' }
+  return { kind: 'cleared' }
+}

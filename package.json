@@ -1,9 +1,9 @@
 {
   "name": "@local/agent-plan-entry",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
-  "description": "Reminds an agent to enter native DSH plan mode for medium or complex tasks and adds the tool that performs the transition.",
+  "description": "Reminds an agent to plan first for medium or complex tasks, adds the tool that enters plan mode, and moves plan-mode guidance out of the system prompt so entering or leaving plan mode never rewrites the cached prefix.",
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",

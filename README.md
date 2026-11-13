@@ -39,12 +39,14 @@ npm test
 
 ## 上下文位置
 
-以下两段不再进入系统提示词（surface 节点 0），而是每步以一条尾部用户消息送达：
+只有部署拥有的 `plan:policy` 会被搬走：
 
-| 段落 | 内容 | 何时送达 |
+| 段落 | 内容 | 位置 |
 |---|---|---|
-| `agent-plan-entry:complexity-policy` | 本插件的复杂度提醒 | 计划模式未激活时 |
-| `plan:policy` | 部署配置的原生计划指引（默认配置在 preset 的 `plan-mode` 行） | 计划模式激活（含等待生效的进入）时 |
+| `agent-plan-entry:complexity-policy` | 本插件的规划策略：什么任务该先规划、进入后只读探索、用 `exit_plan_mode` 提交计划 | **常驻系统提示词**；两种状态下文字完全相同，计划切换不动头部 |
+| `plan:policy` | 部署配置的原生计划指引（默认配置在 preset 的 `plan-mode` 行） | 移出头部；仅在计划模式激活（含等待生效的进入）时以尾部消息送达 |
+
+本插件自己的段落刻意**不**随计划状态翻转。若它在计划模式里变成空串，进入时就只能先撤回、退出时再原样重发一遍，同一段文字会在会话里出现两次。保持恒定后，进入只追加一条计划指引，退出只用一条短通知撤回它，两者不再重复。
 
 送达形状（`source.kind = 'agent-plan-entry'`，`form = 'snapshot'`，`sections` 记录结构化来源）：
 
@@ -58,7 +60,7 @@ Current plan-mode guidance. This snapshot supersedes earlier plan-mode guidance.
 
 指导文本与头部版本逐字一致：插件从组装结果取出该段，用 `renderPrompt` 按原变量插值得到模型可见文本，再搬到最后。因此 `{{model}}` 之类的变量照常生效；段落文本里出现的 `</system-reminder>` 会被转义，避免提前闭合包裹。
 
-切换时只追加、不重写：计划段从无到有时首句写 `Plan mode is now active.`，从有到无时写 `Plan mode is now inactive.`，其余情况写 `Current plan-mode guidance.`，因此进入与退出在预览里也能区分。文本与上一次送达相同则不重复发送；从有到无且 `noticeWhenCleared` 为真时，追加一条 `Plan mode is inactive. … no longer applies …` 通知（`form = 'notice'`）。已送达内容从 Session surface 反向折叠得到，compaction、resume、fork 后自动重建；被压缩遮蔽的指导会在下一次开始时重发。
+切换时只追加、不重写：计划段从无到有时首句写 `Plan mode is now active.`，从有到无时不重发旧文，只追加一条 `Plan mode is inactive. … no longer applies …` 的短通知（`form = 'notice'`，受 `noticeWhenCleared` 控制）；其余情况首句写 `Current plan-mode guidance.`。文本与上一次送达相同则不发送。已送达内容从 Session surface 反向折叠得到，compaction、resume、fork 后自动重建；被压缩遮蔽的指导会在下一次开始时重发。
 
 ## 配置
 
@@ -72,7 +74,7 @@ Current plan-mode guidance. This snapshot supersedes earlier plan-mode guidance.
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `relocatedSections` | `['plan:policy']` | 额外搬到尾部的系统提示词段名；本插件自己的复杂度段落固定搬运 |
+| `relocatedSections` | `['plan:policy']` | 搬到尾部的系统提示词段名；本插件自己的策略段落常驻头部，不受此配置影响 |
 | `noticeWhenCleared` | `true` | 指导从有到无时补一条失效通知 |
 
 未知键或类型错误在加载期报错，不会静默忽略。
@@ -81,7 +83,7 @@ Current plan-mode guidance. This snapshot supersedes earlier plan-mode guidance.
 
 结论基于 DSH `0.2.2-rc.2` 的 `dsh-agent-loop`、`dsh-llm`、`dsh-llm-pi-ai` 实现。
 
-- **本插件消除的变化点**：进入/退出计划模式时，`plan:policy` 与 `agent-plan-entry:complexity-policy` 的文本不再改变系统提示词，节点 0 的字节保持稳定；指导以新消息追加在对话尾部。
+- **本插件消除的变化点**：进入/退出计划模式时系统提示词字节不变——`plan:policy` 始终被摘出头部，本插件段落文字恒定——因此节点 0 不再被替换。进入时只在尾部追加一条计划指引，退出时只在尾部追加一条撤回通知，不重复下发同文内容。
 - **仍未消除的变化点**：原生 `exit_plan_mode` 首次进入计划模式时被准入，工具表随之变化。当路由未声明 `toolUpdate`（当前 `openai-responses` 配置即如此），`agent-loop` 会置 `startsSeries` 并重发完整系统提示词与工具声明，这一次仍会重写请求前缀。要彻底消除，需要同时安装按需披露工具定义的插件（例如动态工具加载），或换用支持增量工具更新的路由。
 - **不可配置**：`supportsMidConvoSystemMessages` 与 `supportsAdditionalTools` 在 `dsh-llm-pi-ai` 中对所有协议标记为 `withhold`，写入 profile 会在 `resolveModelCompat` 处报错。
 - **本插件不额外增加边界**：送达只追加消息；重复内容不发送。

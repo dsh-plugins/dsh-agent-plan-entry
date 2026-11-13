@@ -51,3 +51,21 @@ export declare const CLEARED_GUIDANCE_SUMMARY = "Plan mode inactive";
  * @returns whether both lists carry the same names and text in the same order.
  */
 export declare function sameSections(left: readonly GuidanceSection[], right: readonly GuidanceSection[]): boolean;
+/** What one step must deliver, if anything. */
+export type Delivery = {
+    readonly kind: 'none';
+} | {
+    readonly kind: 'snapshot';
+    readonly sections: readonly GuidanceSection[];
+} | {
+    readonly kind: 'cleared';
+};
+/**
+ * Decide what a step delivers, given the sections it assembled and the sections
+ * the model read last.
+ * @param desired - sections the current step relocated out of the prompt head.
+ * @param delivered - sections the model read in the previous delivery.
+ * @param noticeWhenCleared - whether retired guidance produces a notice.
+ * @returns the delivery, or `none` when the model already reads the current guidance.
+ */
+export declare function planDelivery(desired: readonly GuidanceSection[], delivered: readonly GuidanceSection[], noticeWhenCleared: boolean): Delivery;
