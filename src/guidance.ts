@@ -25,17 +25,65 @@ export function escapeReminderText(text: string): string {
   return text.replace(CLOSING_TAG, tag => `<\\${tag.slice(1)}`)
 }
 
+/** How the plan state changed since the previous delivery. */
+export type GuidanceTransition = 'entered' | 'left'
+
+/**
+ * The prompt section that carries the deployment's plan guidance.
+ * Its configuration belongs to dsh-plan-mode, so the plugin can only recognize
+ * the section by the name that package registers.
+ */
+export const PLAN_POLICY_SECTION = 'plan:policy'
+
+/**
+ * Name the change the model is about to read, so an entry and an exit stay
+ * distinguishable at a glance.
+ * @param transition - the plan section appeared or disappeared, when known.
+ * @returns the leading sentence of the snapshot.
+ */
+function transitionLine(transition: GuidanceTransition | undefined): string {
+  switch (transition) {
+    case 'entered':
+      return 'Plan mode is now active. This snapshot supersedes earlier plan-mode guidance.'
+    case 'left':
+      return 'Plan mode is now inactive. This snapshot supersedes earlier plan-mode guidance.'
+    default:
+      return 'Current plan-mode guidance. This snapshot supersedes earlier plan-mode guidance.'
+  }
+}
+
 /**
  * Render the snapshot delivered to the model.
  * @param sections - relocated sections in prompt order; at least one.
+ * @param transition - whether the plan section appeared or disappeared.
  * @returns complete user-message text, including the reminder wrapper.
  */
-export function renderGuidance(sections: readonly GuidanceSection[]): string {
+export function renderGuidance(
+  sections: readonly GuidanceSection[],
+  transition?: GuidanceTransition,
+): string {
   const body = sections
     .map(section => escapeReminderText(section.text))
     .filter(text => text.length > 0)
     .join('\n\n')
-  return `<system-reminder>\nCurrent plan-mode guidance. This snapshot supersedes earlier plan-mode guidance.\n\n${body}\n</system-reminder>`
+  return `<system-reminder>\n${transitionLine(transition)}\n\n${body}\n</system-reminder>`
+}
+
+/**
+ * Read the plan-state change from the delivered and desired section names.
+ * @param delivered - sections the model read last.
+ * @param desired - sections the current step applies.
+ * @returns the transition, or undefined when the plan section did not change sides.
+ */
+export function planTransition(
+  delivered: readonly GuidanceSection[],
+  desired: readonly GuidanceSection[],
+): GuidanceTransition | undefined {
+  const had = delivered.some(section => section.name === PLAN_POLICY_SECTION)
+  const has = desired.some(section => section.name === PLAN_POLICY_SECTION)
+  if (has && !had) return 'entered'
+  if (!has && had) return 'left'
+  return undefined
 }
 
 /** The notice that retires previously delivered guidance. */

@@ -58,7 +58,7 @@ Current plan-mode guidance. This snapshot supersedes earlier plan-mode guidance.
 
 指导文本与头部版本逐字一致：插件从组装结果取出该段，用 `renderPrompt` 按原变量插值得到模型可见文本，再搬到最后。因此 `{{model}}` 之类的变量照常生效；段落文本里出现的 `</system-reminder>` 会被转义，避免提前闭合包裹。
 
-切换时只追加、不重写：文本与上一次送达相同则不重复发送；从有到无且 `noticeWhenCleared` 为真时，追加一条 `Plan mode is inactive. … no longer applies …` 通知（`form = 'notice'`）。已送达内容从 Session surface 反向折叠得到，compaction、resume、fork 后自动重建；被压缩遮蔽的指导会在下一次开始时重发。
+切换时只追加、不重写：计划段从无到有时首句写 `Plan mode is now active.`，从有到无时写 `Plan mode is now inactive.`，其余情况写 `Current plan-mode guidance.`，因此进入与退出在预览里也能区分。文本与上一次送达相同则不重复发送；从有到无且 `noticeWhenCleared` 为真时，追加一条 `Plan mode is inactive. … no longer applies …` 通知（`form = 'notice'`）。已送达内容从 Session surface 反向折叠得到，compaction、resume、fork 后自动重建；被压缩遮蔽的指导会在下一次开始时重发。
 
 ## 配置
 

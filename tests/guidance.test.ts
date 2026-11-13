@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   CLEARED_GUIDANCE_TEXT,
   escapeReminderText,
+  planTransition,
   renderGuidance,
   sameSections,
 } from '../src/guidance.ts'
@@ -75,4 +76,21 @@ test('the cleared notice retires earlier guidance', () => {
   assert.ok(CLEARED_GUIDANCE_TEXT.startsWith('<system-reminder>\n'))
   assert.ok(CLEARED_GUIDANCE_TEXT.includes('no longer applies'))
   assert.equal(CLEARED_GUIDANCE_TEXT.match(/<\/system-reminder>/g)?.length, 1)
+})
+
+test('renderGuidance names the plan-state change so entry and exit differ', () => {
+  const entered = renderGuidance([planPolicy], 'entered')
+  const left = renderGuidance([complexity], 'left')
+  const plain = renderGuidance([complexity])
+  assert.ok(entered.startsWith('<system-reminder>') && entered.includes('Plan mode is now active.'))
+  assert.ok(left.startsWith('<system-reminder>') && left.includes('Plan mode is now inactive.'))
+  assert.ok(plain.includes('Current plan-mode guidance.'))
+  assert.notEqual(entered.split('\n')[1], left.split('\n')[1])
+})
+
+test('planTransition reads the change from the plan section presence', () => {
+  assert.equal(planTransition([complexity], [planPolicy]), 'entered')
+  assert.equal(planTransition([planPolicy], [complexity]), 'left')
+  assert.equal(planTransition([complexity], [complexity]), undefined)
+  assert.equal(planTransition([], [planPolicy]), 'entered')
 })

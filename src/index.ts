@@ -12,6 +12,8 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import {
   CLEARED_GUIDANCE_SUMMARY,
   CLEARED_GUIDANCE_TEXT,
+  PLAN_POLICY_SECTION,
+  planTransition,
   renderGuidance,
   sameSections,
   type GuidanceSection,
@@ -43,7 +45,6 @@ export const Config: z<Config> = z.object({
 
 const ENTER_PLAN_MODE = 'enter_plan_mode'
 const PROMPT_SECTION = 'agent-plan-entry:complexity-policy'
-const PLAN_POLICY_SECTION = 'plan:policy'
 const PLAN_ENTRY_PROMPT = 'Assess task complexity before taking action. Unless a task is trivial, localized to a single file, and fully specified, you MUST call `enter_plan_mode` first—especially for multi-file/module changes, architectural decisions, ambiguous requirements, or coordinated updates. While in plan mode, perform strictly read-only exploration without mutating any files or system state. Once ready, call `exit_plan_mode` with a comprehensive implementation plan and wait for explicit user approval before executing. When in doubt, always default to planning first.'
 
 interface PlanSelection {
@@ -105,9 +106,12 @@ function deliveredSections(agent: Agent): readonly GuidanceSection[] {
   return []
 }
 
-function guidanceMessage(sections: readonly GuidanceSection[]): UserMessage {
+function guidanceMessage(
+  sections: readonly GuidanceSection[],
+  transition: ReturnType<typeof planTransition>,
+): UserMessage {
   return createUserMessage({
-    content: [{ type: 'text', text: renderGuidance(sections) }],
+    content: [{ type: 'text', text: renderGuidance(sections, transition) }],
     source: { kind: name, form: 'snapshot', sections },
   })
 }
@@ -272,7 +276,9 @@ function registerDelivery(ctx: Context, noticeWhenCleared: boolean): void {
       const delivered = deliveredSections(agent)
       if (sameSections(desired, delivered)) return decision
       if (desired.length === 0 && (!noticeWhenCleared || delivered.length === 0)) return decision
-      const message = desired.length === 0 ? clearedGuidanceMessage() : guidanceMessage(desired)
+      const message = desired.length === 0
+        ? clearedGuidanceMessage()
+        : guidanceMessage(desired, planTransition(delivered, desired))
       return { ...decision, messages: [...decision.messages, message] }
     } catch (error: unknown) {
       ctx.logger.warn('agent-plan-entry: failed to deliver relocated guidance at step start: %o', error)
