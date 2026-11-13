@@ -1,6 +1,6 @@
 {
   "name": "@local/agent-plan-entry",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Reminds an agent to enter native DSH plan mode for medium or complex tasks and adds the tool that performs the transition.",
@@ -15,27 +15,42 @@
   "files": [
     "lib/**/*.js",
     "lib/**/*.d.ts",
+    "src/**/*.ts",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test tests/"
   },
-  "dependencies": {
-    "@deepseek-ai/dsh-tools": "0.2.2-rc.2"
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-agent": "^0.2.2-rc.2",
+    "@deepseek-ai/dsh-agent-preset-registry": "^0.2.2-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.2.2-rc.2",
+    "@deepseek-ai/dsh-plan-mode": "^0.2.2-rc.2",
+    "@deepseek-ai/dsh-session": "^0.2.2-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.2-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.2.2-rc.2",
+    "@deepseek-ai/schemastery": "~3.19.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
     "@deepseek-ai/dsh-agent": "0.2.2-rc.2",
     "@deepseek-ai/dsh-agent-preset-registry": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
     "@deepseek-ai/dsh-plan-mode": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.2",
     "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.2",
+    "@deepseek-ai/schemastery": "3.19.0",
     "typescript": "5.9.3"
   },
   "engines": {
-    "dsh": "^0.2.2-rc.2"
+    "dsh": ">=0.2.2-rc.2 <0.3.0"
   },
   "dsh": {
     "bundle": {
