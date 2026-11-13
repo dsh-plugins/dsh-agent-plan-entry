@@ -34,6 +34,18 @@ npm run build
 
 `reason` 为必填字符串，用于记录使规划变得必要的具体复杂度，例如跨文件影响、架构决策、需求不确定性或较高风险。
 
+## 缓存影响
+
+进入计划模式会重写请求前缀，本节记录该代价的来源与边界，结论基于 DSH `0.2.2-rc.2` 的 `dsh-agent-loop`、`dsh-llm`、`dsh-llm-pi-ai` 实现。
+
+- **变化点**：进入时原生 `plan:policy` 系统段落（顺序 500）从无到有，原生 `exit_plan_mode` 同时进入工具表。两者都由 `@deepseek-ai/dsh-plan-mode` 决定，不由本插件引入。
+- **根因**：`agent-loop` 在工具集变化且路由未声明 `toolUpdate` 时置 `startsSeries: true`，开启新的请求序列并重发完整系统提示词与工具声明。当前 `openai-responses` 路由正属此情形。
+- **不可配置**：该能力对应 pi-ai 的 `compat.supportsMidConvoSystemMessages` 与 `supportsAdditionalTools`，`dsh-llm-pi-ai` 把所有协议的这两个字段标记为 `withhold`，写入 profile 会在 `resolveModelCompat` 处直接报错。
+- **不可遮蔽**：用同名常驻工具抵消工具表变化行不通，`ToolsService.resolve()` 先按作用域遮蔽再按 `when` 过滤，原生 `exit_plan_mode` 注册始终遮蔽外部同名注册。
+- **本插件不额外增本**：`agent-plan-entry:complexity-policy` 段落随模式翻转，但原生段落已先改变整段系统提示词，因此不构成额外的缓存边界；保持现状即可。
+
+仅当上游放开这些 compat gate 或改用支持增量工具更新的路由时，本节结论需要重新评估。
+
 ## 适用边界
 
 适合多文件或架构改动、需求含糊、执行顺序不显然以及后果较大的任务；只有单文件、局部且需求完全明确的小任务可以直接执行。计划模式只提供行为指引，不强制限制工具，强制边界仍由沙箱与审批策略负责。
