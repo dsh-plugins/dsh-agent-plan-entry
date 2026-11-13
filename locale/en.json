@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Agent plan mode entry",
-    "description": "Reminds the agent to enter plan mode for medium or complex tasks and provides the tool that performs the transition."
+    "description": "Reminds the agent to enter plan mode for medium or complex tasks, provides the tool that performs the transition, and delivers plan guidance at the conversation tail instead of the prompt head."
   }
 }

@@ -1,16 +1,49 @@
+import z from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PlanModeController } from '@deepseek-ai/dsh-plan-mode'
-import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
+import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import type { AssembledSection, AssembleContext, PromptPresentation } from '@deepseek-ai/dsh-system-prompt'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import {
+  CLEARED_GUIDANCE_SUMMARY,
+  CLEARED_GUIDANCE_TEXT,
+  renderGuidance,
+  sameSections,
+  type GuidanceSection,
+} from './guidance.ts'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'agent-plan-entry': { kind: 'agent-plan-entry' } & ContextFormed
+  }
+}
 
 export const name = 'agent-plan-entry'
 export const inject = ['tools', 'agentPresets', 'systemPrompt']
 
+/** Plan-entry policy and plan-guidance relocation. */
+export interface Config {
+  /** Prompt sections delivered at the conversation tail instead of the system prompt. */
+  relocatedSections: string[]
+  /** Deliver a notice when relocated guidance stops applying. */
+  noticeWhenCleared: boolean
+}
+
+export const Config: z<Config> = z.object({
+  relocatedSections: z.array(z.string()).default(['plan:policy'])
+    .description('System-prompt sections delivered as trailing context instead of the prompt head.'),
+  noticeWhenCleared: z.boolean().default(true)
+    .description('Deliver a trailing notice when relocated guidance stops applying.'),
+})
+
 const ENTER_PLAN_MODE = 'enter_plan_mode'
 const PROMPT_SECTION = 'agent-plan-entry:complexity-policy'
+const PLAN_POLICY_SECTION = 'plan:policy'
 const PLAN_ENTRY_PROMPT = 'Assess task complexity before taking action. Unless a task is trivial, localized to a single file, and fully specified, you MUST call `enter_plan_mode` first—especially for multi-file/module changes, architectural decisions, ambiguous requirements, or coordinated updates. While in plan mode, perform strictly read-only exploration without mutating any files or system state. Once ready, call `exit_plan_mode` with a comprehensive implementation plan and wait for explicit user approval before executing. When in doubt, always default to planning first.'
 
 interface PlanSelection {
@@ -35,6 +68,55 @@ function planModeEntry(ctx: Context, agent: Agent): PlanModeEntry | undefined {
 
 function selectedActive(state: PlanSelection): boolean {
   return state.pending ?? state.active
+}
+
+/** Sections the current step relocated out of the prompt head, keyed by Agent. */
+const relocatedByAgent = new WeakMap<Agent, readonly GuidanceSection[]>()
+
+/**
+ * Render one section exactly as the head would have carried it.
+ * @param section - assembled section before interpolation.
+ * @param variables - assembly variables available to the section.
+ * @returns the model-visible section text.
+ */
+function visibleSectionText(
+  section: AssembledSection,
+  variables: PromptPresentation['variables'],
+): string {
+  return renderPrompt({ sections: [section], contexts: [], variables, tools: [] })
+}
+
+/**
+ * Read the guidance this plugin delivered before the current step.
+ * Scans the live surface backwards, so compaction, resume, and fork rebuild the
+ * comparison from durable messages instead of process-local state.
+ * @param agent - agent whose session is scanned.
+ * @returns the delivered sections, or an empty list when the last delivery was a cleared notice.
+ */
+function deliveredSections(agent: Agent): readonly GuidanceSection[] {
+  for (const seq of agent.session.surface.nodes.toReversed()) {
+    const event = agent.session.eventAt(seq)
+    if (event?.type !== 'user/message') continue
+    const source = event.data.source
+    if (source.kind !== 'agent-plan-entry') continue
+    // A snapshot carries its sections; a notice means guidance was retired.
+    return 'sections' in source && Array.isArray(source.sections) ? source.sections : []
+  }
+  return []
+}
+
+function guidanceMessage(sections: readonly GuidanceSection[]): UserMessage {
+  return createUserMessage({
+    content: [{ type: 'text', text: renderGuidance(sections) }],
+    source: { kind: name, form: 'snapshot', sections },
+  })
+}
+
+function clearedGuidanceMessage(): UserMessage {
+  return createUserMessage({
+    content: [{ type: 'text', text: CLEARED_GUIDANCE_TEXT }],
+    source: { kind: name, form: 'notice', summary: CLEARED_GUIDANCE_SUMMARY },
+  })
 }
 
 function createEnterPlanModeTool(ctx: Context): ToolDefinition {
@@ -114,7 +196,93 @@ function createEnterPlanModeTool(ctx: Context): ToolDefinition {
   })
 }
 
-export function apply(ctx: Context): void {
+/**
+ * Move the configured sections out of the prompt head and remember them for this step.
+ * The step's request then carries a byte-identical prompt head; delivery follows on the tail.
+ * @param ctx - plugin context owning the assembly listener.
+ * @param relocated - section names delivered as trailing context.
+ */
+function registerRelocation(ctx: Context, relocated: ReadonlySet<string>): void {
+  ctx.on('system-prompt/assemble', async (assembly, context: AssembleContext, next) => {
+    const result = await next()
+    const agent = context.agent
+    // Diagnostic assemblies carry no step signal; they must not clear the step's stash.
+    if (agent === undefined || context.signal === undefined) return result
+
+    const kept: AssembledSection[] = []
+    const moved: GuidanceSection[] = []
+    for (const section of result.sections) {
+      if (!relocated.has(section.name)) {
+        kept.push(section)
+        continue
+      }
+      let text: string
+      try {
+        text = visibleSectionText(section, result.variables)
+      } catch (error: unknown) {
+        ctx.logger.warn('agent-plan-entry: cannot render relocated section %s: %o', section.name, error)
+        return result
+      }
+      if (text.length > 0) moved.push({ name: section.name, text })
+    }
+
+    if (moved.length === 0 && kept.length === result.sections.length) {
+      relocatedByAgent.set(agent, [])
+      return result
+    }
+    relocatedByAgent.set(agent, moved)
+    if (moved.length === 0 && relocated.has(PLAN_POLICY_SECTION)) {
+      warnWhenPlanPolicyMissing(ctx, agent, result)
+    }
+    return { ...result, sections: kept }
+  })
+}
+
+/**
+ * Report the one composition this relocation cannot serve: a complete-section
+ * persona replaces the assembled prompt after this waterfall, so plan guidance
+ * never reaches the model.
+ * @param ctx - plugin context for the warning channel.
+ * @param agent - agent being assembled.
+ * @param assembly - assembly whose sections were inspected.
+ */
+function warnWhenPlanPolicyMissing(ctx: Context, agent: Agent, assembly: PromptPresentation): void {
+  try {
+    const entry = planModeEntry(ctx, agent)
+    if (entry === undefined || !selectedActive(entry.state)) return
+    if (assembly.sections.some(section => section.name === PLAN_POLICY_SECTION)) return
+    ctx.logger.warn('agent-plan-entry: plan mode is active but no %s section was assembled; the plan guidance cannot be relocated for this agent', PLAN_POLICY_SECTION)
+  } catch (error: unknown) {
+    ctx.logger.warn('agent-plan-entry: cannot inspect plan state while checking relocated guidance: %o', error)
+  }
+}
+
+/**
+ * Deliver the step's relocated sections as one trailing context message.
+ * A failure here must never block the step, so it reports and returns the decision unchanged.
+ * @param ctx - plugin context owning the pre-step listener.
+ * @param active - whether a cleared notice is delivered.
+ */
+function registerDelivery(ctx: Context, noticeWhenCleared: boolean): void {
+  ctx.on('agent/pre-step', async ({ agent, signal }, next): Promise<PreStepDecision> => {
+    const decision = await next()
+    if (decision.kind === 'reject' || signal.aborted) return decision
+    try {
+      const desired = relocatedByAgent.get(agent) ?? []
+      const delivered = deliveredSections(agent)
+      if (sameSections(desired, delivered)) return decision
+      if (desired.length === 0 && (!noticeWhenCleared || delivered.length === 0)) return decision
+      const message = desired.length === 0 ? clearedGuidanceMessage() : guidanceMessage(desired)
+      return { ...decision, messages: [...decision.messages, message] }
+    } catch (error: unknown) {
+      ctx.logger.warn('agent-plan-entry: failed to deliver relocated guidance at step start: %o', error)
+      return decision
+    }
+  }, { prepend: true })
+}
+
+export function apply(ctx: Context, config: Config): void {
+  const relocated = new Set([...config.relocatedSections, PROMPT_SECTION])
   ctx.effect(() => {
     const disposeTool = ctx.tools.register(createEnterPlanModeTool(ctx), {
       when: ({ agent }) => planModeFor(ctx, agent) !== undefined,
@@ -137,4 +305,7 @@ export function apply(ctx: Context): void {
       disposeTool()
     }
   }, 'agent-plan-entry: register plan entry tool and prompt section')
+
+  registerRelocation(ctx, relocated)
+  registerDelivery(ctx, config.noticeWhenCleared)
 }
