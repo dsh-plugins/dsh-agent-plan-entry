@@ -2,15 +2,24 @@
 
 为 Agent 提供 `enter_plan_mode` 工具，并在系统提示词末尾提醒 Agent：除单文件、局部且需求完全明确的小任务外，必须先进入计划模式、只读探索并提交计划。用户仍通过 `exit_plan_mode` 审阅并批准计划。
 
-## 本地安装
+## 兼容版本
 
-本 bundle 以工作区目录链接方式安装时，运行时依赖从源码目录解析，而不是从 profile 的 `node_modules` 解析。重新安装前需在本目录执行：
+针对 DSH `0.2.2-rc.2` 编写与验证，`engines.dsh` 为 `^0.2.2-rc.2`，覆盖 0.2 线后续 rc 与正式版。若后续版本调整了工具、提示词或预设服务契约，需要重新核对。
+
+## 构建
+
+源码为 TypeScript，位于 `src/index.ts`；运行时加载 `lib/` 中的编译产物。
 
 ```powershell
-npm install --ignore-scripts
+npm install --ignore-scripts --legacy-peer-deps
+npm run build
 ```
 
-随后通过 `plugin_manager` 的 `install_bundle` 安装本目录。
+`lib/` 随仓库提交，安装与加载不需要构建工具链。修改源码后必须重新构建，否则运行的是旧产物；安装过程不会自动构建。
+
+## 本地安装
+
+本 bundle 以工作区目录链接方式安装时，运行时依赖从源码目录解析，而不是从 profile 的 `node_modules` 解析。依赖已随 `package.json` 安装到本目录后，通过 `plugin_manager` 的 `install_bundle` 安装。
 
 ## 行为
 

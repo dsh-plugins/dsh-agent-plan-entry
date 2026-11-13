@@ -1,22 +1,43 @@
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import type { PlanModeController } from '@deepseek-ai/dsh-plan-mode'
+import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 
 export const name = 'agent-plan-entry'
 export const inject = ['tools', 'agentPresets', 'systemPrompt']
 
 const ENTER_PLAN_MODE = 'enter_plan_mode'
+const PROMPT_SECTION = 'agent-plan-entry:complexity-policy'
 const PLAN_ENTRY_PROMPT = 'Assess task complexity before taking action. Unless a task is trivial, localized to a single file, and fully specified, you MUST call `enter_plan_mode` first—especially for multi-file/module changes, architectural decisions, ambiguous requirements, or coordinated updates. While in plan mode, perform strictly read-only exploration without mutating any files or system state. Once ready, call `exit_plan_mode` with a comprehensive implementation plan and wait for explicit user approval before executing. When in doubt, always default to planning first.'
 
-function planModeFor(ctx, agent) {
+interface PlanSelection {
+  readonly active: boolean
+  readonly pending?: boolean
+}
+
+interface PlanModeEntry {
+  readonly planMode: PlanModeController
+  readonly state: PlanSelection
+}
+
+function planModeFor(ctx: Context, agent: Agent): PlanModeController | undefined {
   return ctx.agentPresets.serviceFor(agent, 'planMode')
 }
 
-function planModeState(ctx, agent) {
+function planModeEntry(ctx: Context, agent: Agent): PlanModeEntry | undefined {
   const planMode = planModeFor(ctx, agent)
   if (planMode === undefined) return undefined
   return { planMode, state: planMode.get(agent) }
 }
 
-function enterPlanModeTool(ctx) {
+function selectedActive(state: PlanSelection): boolean {
+  return state.pending ?? state.active
+}
+
+function createEnterPlanModeTool(ctx: Context): ToolDefinition {
   return defineTool({
     name: ENTER_PLAN_MODE,
     description: 'Enter plan mode before implementation when task complexity or risk makes an approved plan valuable. Use it for cross-file or architectural changes, ambiguous requirements, non-obvious sequencing, or work with substantial consequences. Do not use it for simple questions or small, fully specified edits. Call it alone before changing files. Plan mode becomes active on the next step; explore read-only, then present the complete plan with exit_plan_mode. If plan mode is already active, this tool returns that state without changing it.',
@@ -63,7 +84,7 @@ function enterPlanModeTool(ctx) {
         throw new Error(`${ENTER_PLAN_MODE} requires a non-empty reason`)
       }
 
-      const entry = planModeState(ctx, agent)
+      const entry = planModeEntry(ctx, agent)
       if (entry === undefined) {
         throw new Error('Plan mode is unavailable in the current agent preset')
       }
@@ -93,20 +114,20 @@ function enterPlanModeTool(ctx) {
   })
 }
 
-export function apply(ctx) {
+export function apply(ctx: Context): void {
   ctx.effect(() => {
-    const disposeTool = ctx.tools.register(enterPlanModeTool(ctx), {
+    const disposeTool = ctx.tools.register(createEnterPlanModeTool(ctx), {
       when: ({ agent }) => planModeFor(ctx, agent) !== undefined,
     })
     const disposePrompt = ctx.systemPrompt.section({
-      name: 'agent-plan-entry:complexity-policy',
+      name: PROMPT_SECTION,
       order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 1,
-      text: (context) => {
-        if (context.agent === undefined) return ''
-        const entry = planModeState(ctx, context.agent)
+      text: (context: AssembleContext) => {
+        const agent = context.agent
+        if (agent === undefined) return ''
+        const entry = planModeEntry(ctx, agent)
         if (entry === undefined) return ''
-        const selected = entry.state.pending === undefined ? entry.state.active : entry.state.pending
-        return selected ? '' : PLAN_ENTRY_PROMPT
+        return selectedActive(entry.state) ? '' : PLAN_ENTRY_PROMPT
       },
       interpolate: false,
     })
@@ -115,5 +136,5 @@ export function apply(ctx) {
       disposePrompt()
       disposeTool()
     }
-  }, 'agent-plan-entry: register plan entry prompt and tool')
+  }, 'agent-plan-entry: register plan entry tool and prompt section')
 }
