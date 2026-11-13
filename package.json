@@ -1,0 +1,30 @@
+{
+  "name": "@local/agent-plan-entry",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reminds an agent to enter native DSH plan mode for medium or complex tasks and adds the tool that performs the transition.",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1"
+  },
+  "engines": {
+    "dsh": "0.2.2-rc.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

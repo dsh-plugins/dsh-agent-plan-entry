@@ -1,0 +1,3 @@
+- insert:
+    - id: agent-plan-entry
+      name: '@local/agent-plan-entry'
