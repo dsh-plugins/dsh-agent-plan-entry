@@ -25,8 +25,16 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-export const name = 'agent-plan-entry'
+export const name = '@dsh-plugin/dsh-agent-plan-entry'
 export const inject = ['tools', 'agentPresets', 'systemPrompt']
+
+/**
+ * Message source kind used for every delivered snapshot and notice. Kept apart
+ * from {@link name}: the Cordis plugin name is the published package name, while
+ * the source kind is recorded in session history and must stay stable across
+ * renames so resume and fork still fold earlier guidance.
+ */
+const SOURCE_KIND = 'agent-plan-entry'
 
 /** Plan-entry policy and plan-guidance relocation. */
 export interface Config {
@@ -112,14 +120,14 @@ function guidanceMessage(
 ): UserMessage {
   return createUserMessage({
     content: [{ type: 'text', text: renderGuidance(sections, transition) }],
-    source: { kind: name, form: 'snapshot', sections },
+    source: { kind: SOURCE_KIND, form: 'snapshot', sections },
   })
 }
 
 function clearedGuidanceMessage(): UserMessage {
   return createUserMessage({
     content: [{ type: 'text', text: CLEARED_GUIDANCE_TEXT }],
-    source: { kind: name, form: 'notice', summary: CLEARED_GUIDANCE_SUMMARY },
+    source: { kind: SOURCE_KIND, form: 'notice', summary: CLEARED_GUIDANCE_SUMMARY },
   })
 }
 

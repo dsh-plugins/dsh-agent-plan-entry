@@ -8,7 +8,7 @@ declare module '@deepseek-ai/dsh-llm' {
         } & ContextFormed;
     }
 }
-export declare const name = "agent-plan-entry";
+export declare const name = "@dsh-plugin/dsh-agent-plan-entry";
 export declare const inject: string[];
 /** Plan-entry policy and plan-guidance relocation. */
 export interface Config {
