@@ -174,6 +174,9 @@ function createEnterPlanModeTool(ctx: Context): ToolDefinition {
       if (agent === undefined) {
         throw new Error(`${ENTER_PLAN_MODE} requires an agent context`)
       }
+      if (agent.session.header.origin === 'subagent') {
+        throw new Error(`${ENTER_PLAN_MODE} is unavailable to subagents`)
+      }
       if (args.reason.trim() === '') {
         throw new Error(`${ENTER_PLAN_MODE} requires a non-empty reason`)
       }
@@ -296,17 +299,20 @@ export function apply(ctx: Context, config: Config): void {
   const relocated = new Set(config.relocatedSections)
   ctx.effect(() => {
     const disposeTool = ctx.tools.register(createEnterPlanModeTool(ctx), {
-      when: ({ agent }) => planModeFor(ctx, agent) !== undefined,
+      when: ({ agent }) => agent.session.header.origin !== 'subagent' && planModeFor(ctx, agent) !== undefined,
     })
     const disposePrompt = ctx.systemPrompt.section({
       name: PROMPT_SECTION,
       order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 1,
       text: (context: AssembleContext) => {
         const agent = context.agent
-        if (agent === undefined) return ''
-        if (planModeFor(ctx, agent) === undefined) return ''
-        // Constant by design: the paragraph states the policy for both phases, so
-        // plan-mode transitions leave the assembled system prompt byte-identical.
+        if (agent === undefined || agent.session.header.origin === 'subagent') {
+          return ''
+        }
+        if (planModeFor(ctx, agent) === undefined) {
+          return ''
+        }
+        // 主代理的策略在两种状态下保持一致，避免计划模式切换改变请求前缀。
         return PLAN_ENTRY_PROMPT
       },
       interpolate: false,
